@@ -1,0 +1,115 @@
+######### 
+# Owner: 66degrees
+# Author: Bishwajeet Biswas
+# Version: 0.0.1
+########
+
+
+name: 'Tf set up and plan'
+description: 'Set ups Terraform and does all except Apply'
+inputs:
+  tf_directory:  # id of input
+    description: 'where to execute terraform'
+    required: true
+  org_root: 
+    description: 'root folder name'
+    required: true
+  environment: 
+    description: 'mention the environment'
+    required: true
+  wif_provider: 
+    description: 'Workload Identity Federation provider'
+    required: true
+  tf_sa: 
+    description: 'GCP service account for Terraform'
+    required: true
+  terraforom_version: 
+    description: 'GCP Terraform Version'
+    required: true
+    default: 1.2.9
+  gcs_bucket: 
+    description: 'State file storage for Terraform'
+    required: true
+  github_token: 
+    description: 'github secret'
+    required: true
+  
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup jq
+      uses: sergeysova/jq-action@v2
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: ${{ inputs.terraforom_version }}
+        terraform_wrapper: false
+
+    - id: 'auth'
+      name: 'Authenticate to Google Cloud'
+      uses: 'google-github-actions/auth@v0'
+      with:
+        token_format: 'access_token'
+        workload_identity_provider: '${{ inputs.wif_provider }}'
+        service_account: '${{ inputs.tf_sa }}'
+
+    - name: 'Set up Cloud SDK'
+      uses: 'google-github-actions/setup-gcloud@v0.6.0'
+
+    - name: Terraform Init
+      id: init
+      working-directory: ${{ inputs.tf_directory }}
+      shell: bash
+      env: 
+        GCS_BUCKET: ${{ inputs.gcs_bucket }}
+      run: |
+           cd ../ && echo "working in" && echo $PWD
+           echo "Terraform Version Using: " && terraform version
+
+           echo "Setting up Backend" && \
+           TF_BACKEND_BUCKET=$( echo "${{ inputs.gcs_bucket }}"  )
+           TF_BACKEND_PREFIX=$( echo "${{ inputs.org_root }}/${{ inputs.tf_directory }}" )
+
+           echo $TF_BACKEND_BUCKET && \
+           echo $TF_BACKEND_PREFIX
+
+           terraform  init -backend-config="bucket=${{ inputs.gcs_bucket }}" -backend-config="prefix=${{ inputs.org_root }}/${{ inputs.tf_directory }}"
+
+    - name: Terraform Format
+      id: fmt
+      shell: bash
+      working-directory: ${{ inputs.tf_directory }}
+      run: |
+           cd ../ && echo "working in" && echo $PWD 
+           
+           terraform fmt
+
+    - name: Terraform Validate
+      id: validate
+      shell: bash
+      working-directory: ${{ inputs.tf_directory }}
+      if: github.ref != 'refs/heads/main' && (success() || failure())
+      run: |
+           cd ../ && echo "working in" && echo $PWD
+           
+           terraform validate -no-color
+
+    - name: Terraform Plan
+      id: plan
+      shell: bash
+      working-directory: ${{ inputs.tf_directory }}
+      run: |
+           varfile=$(for i in `ls -1 | grep tfvars`; do echo "-var-file"=${{ inputs.environment }}/$i ; done  | xargs)
+            
+           cd ../ && \
+           echo "working in" && \
+           echo $PWD
+
+           terraform plan $varfile -out tf.plan && \
+           echo "done taking plan" && \
+           cp tf.plan ${{ inputs.environment }}
+
+           terraform show -json tf.plan | jq '.' > ${{ inputs.environment }}/plan.json 
+                

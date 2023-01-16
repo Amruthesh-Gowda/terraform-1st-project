@@ -1,0 +1,145 @@
+stages:
+  - authenticate
+  - tf_ready
+  - tf_plan
+  - tf_deploy
+
+auth_and_tf_init: 
+  image: google/cloud-sdk:alpine
+  stage: authenticate
+  # tags:
+  #   - kubernetes
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH =~ /(^hotfix|^feature)/'
+      changes:
+        - ${TF_DIRECTORY}/**/*
+      allow_failure: true      
+    - if: '$CI_COMMIT_BRANCH =~ /(^main$|^master$)/'
+      changes:
+        - ${TF_DIRECTORY}/**/*
+      allow_failure: true
+  before_script: 
+    - echo $CI_JOB_JWT_V2 > .ci_job_jwt_file
+    - echo ${GCP_SERVICE_ACCOUNT}
+    - gcloud iam workload-identity-pools create-cred-config ${GCP_WORKLOAD_IDENTITY_PROVIDER}
+      --service-account=${GCP_SERVICE_ACCOUNT}
+      --output-file=.gcp_temp_cred.json
+      --credential-source-file=`pwd`/.ci_job_jwt_file
+    - gcloud auth login --cred-file=`pwd`/.gcp_temp_cred.json --project ${PROJECT_ID}
+    - apk add jq
+    - chmod +x ./run_gcp_sts.sh
+    - ./run_gcp_sts.sh 
+    - export CLOUDSDK_AUTH_ACCESS_TOKEN=`cat token.json`
+    - export GOOGLE_APPLICATION_CREDENTIALS=`pwd`/.gcp_temp_cred.json
+    - gcloud config set pass_credentials_to_gsutil true
+    - ls -altr
+    - wget https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip
+    - apk add unzip
+    - unzip terraform_${TF_VERSION}_linux_amd64.zip
+    - cp terraform /usr/local/bin/
+    - terraform version
+  script: 
+    - cd ${APPLICATION_DIRECTORY}
+    - terraform init -backend-config="bucket=${STATE_BUCKET}" -backend-config="prefix=${ORG_ROOT}/${TF_DIRECTORY}"
+  artifacts:
+    public: false
+    expire_in: 1 hour
+    paths: 
+    - terraform
+    - ${APPLICATION_DIRECTORY}
+    - token.json
+    - .gcp_temp_cred.json
+    - .ci_job_jwt_file
+
+tf_validate: 
+  image: google/cloud-sdk:alpine
+  stage: tf_ready
+  extends: auth_and_tf_init
+  needs: 
+    - auth_and_tf_init
+  dependencies: 
+    - auth_and_tf_init
+  before_script: 
+    - mv terraform /usr/local/bin/
+    - ls -altr
+  script: 
+    - cd ${APPLICATION_DIRECTORY}
+    - terraform validate 
+
+tf_plan: 
+  image: google/cloud-sdk:alpine
+  stage: tf_plan
+  extends: auth_and_tf_init
+  needs: 
+    - tf_validate
+    - auth_and_tf_init
+  dependencies: 
+    - auth_and_tf_init
+  before_script: 
+    - mv terraform /usr/local/bin/
+    - gcloud auth login --cred-file=`pwd`/.gcp_temp_cred.json --project ${PROJECT_ID}
+    - export CLOUDSDK_AUTH_ACCESS_TOKEN=`cat token.json`
+    - export GOOGLE_APPLICATION_CREDENTIALS=`pwd`/.gcp_temp_cred.json
+    - gcloud config set pass_credentials_to_gsutil true
+    - apk add jq
+  script: 
+    - cd ${TF_DIRECTORY} 
+    - varfile=$(for i in `ls -1 | grep tfvars`; do echo "-var-file"=${ENVIRONMENT}/$i ; done  | xargs)
+    - cd .. && echo $varfile && ls -altr
+    - terraform plan $varfile -out tf.plan
+    - terraform show -json tf.plan | jq '.' > tf.json
+  artifacts:
+    public: false    
+    expire_in: 1 day
+    paths: 
+    - ${APPLICATION_DIRECTORY}
+    - tf.json
+    - tf.plan
+
+Display_tf: 
+  image: google/cloud-sdk:alpine
+  stage: tf_plan
+  extends: tf_plan
+  needs: 
+    - tf_plan
+    - auth_and_tf_init
+  dependencies: 
+    - auth_and_tf_init
+    - tf_plan
+  before_script:
+    - mv terraform /usr/local/bin/
+  script:
+    - cd ${APPLICATION_DIRECTORY}
+    - terraform show tf.plan
+
+
+Apply_tf: 
+  image: google/cloud-sdk:alpine
+  stage: tf_deploy
+  extends: tf_plan
+  needs: 
+    - tf_plan
+    - auth_and_tf_init
+  dependencies: 
+    - auth_and_tf_init
+    - tf_plan
+  # tags:
+  #   - kubernetes
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /(^main$|^master$)/'
+      changes:
+        - ${TF_DIRECTORY}/**/*
+      when: manual
+      allow_failure: true
+  before_script: 
+    - mv terraform /usr/local/bin/
+    - gcloud auth login --cred-file=`pwd`/.gcp_temp_cred.json --project ${PROJECT_ID}
+    - export CLOUDSDK_AUTH_ACCESS_TOKEN=`cat token.json`
+    - export GOOGLE_APPLICATION_CREDENTIALS=`pwd`/.gcp_temp_cred.json
+    - gcloud config set pass_credentials_to_gsutil true
+  script:
+    - cd ${APPLICATION_DIRECTORY}
+    - terraform apply tf.plan

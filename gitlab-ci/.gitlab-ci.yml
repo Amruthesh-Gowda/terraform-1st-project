@@ -1,0 +1,53 @@
+stages:
+  - bootstrap
+  - oidc
+  - org_policies
+  - slz
+  - vpn
+  - workloads
+
+
+variables:
+  TF_VERSION: 1.2.9
+  GCP_WORKLOAD_IDENTITY_PROVIDER: 'projects/666993235204/locations/global/workloadIdentityPools/66d-gitlab-pool-318b1d2c/providers/66d-gitlab-provider-318b1d2c'
+  GCP_SERVICE_ACCOUNT: 'org-terraform-gitlab-prj-b-see@prj-b-seed-22db.iam.gserviceaccount.com'
+  PROJECT_NUMBER: '666993235204'
+  PROJECT_ID: 'prj-b-seed-22db'
+  POOL_ID: 'gitlab-pool-b810ab29' 
+  PROVIDER_ID: 'gitlab-provider-b810ab29' 
+  SERVICE_ACCOUNT_EMAIL: 'org-terraform-gitlab-prj-b-see@prj-b-seed-22db.iam.gserviceaccount.com'
+  STATE_BUCKET: "bkt-b-tfstate-e842"
+
+
+bootstrap:
+  stage: bootstrap
+  # tags:
+  #   - kubernetes
+  variables:
+    ORG_ROOT: "66slz"
+    APPLICATION_DIRECTORY: "0-bootstrap"
+    TF_DIRECTORY: "0-bootstrap/66slz"
+    ENVIRONMENT: "66slz"
+  trigger:
+      include:
+          - local: '${APPLICATION_DIRECTORY}/.gitlab-ci.yml'
+  rules:
+      - changes:
+          - ${TF_DIRECTORY}/**/*
+
+oidc:
+  stage: oidc
+  # tags:
+  #   - kubernetes
+  variables:
+    ORG_ROOT: "66slz"
+    APPLICATION_DIRECTORY: "1-oidc"
+    TF_DIRECTORY: "1-oidc/oidc"
+    ENVIRONMENT: "oidc"
+  trigger:
+      include:
+          - local: '${APPLICATION_DIRECTORY}/.gitlab-ci.yml'
+  rules:
+      - changes:
+          - ${TF_DIRECTORY}/**/*
+

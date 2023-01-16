@@ -1,0 +1,64 @@
+steps:
+  - id: 'TF Init'
+    name: $_TF_IMAGE
+    entrypoint: 'sh'
+    dir: $_APPLICATION_DIRECTORY
+    args:
+    - '-c'
+    - |
+       echo "showing working directory " && \
+       pwd && \
+       ls
+
+       terraform init -backend-config="bucket=$_TF_STATE_BKT" -backend-config="prefix=$_ORG_ROOT/$_TF_DIRECTORY"
+    volumes:
+      - name: tf
+        path: '/checkov'
+
+
+  - id: 'TF Plan'
+    name: $_TF_IMAGE
+    entrypoint: 'sh'
+    dir: $_APPLICATION_DIRECTORY
+    args:
+    - '-c'
+    - |      
+      apk add jq 
+
+      cd $_ENVIRONMENT
+
+      varfile=$(for i in `ls -1 | grep tfvars`; do echo "-var-file"=$_ENVIRONMENT/$$i ; done  | xargs)
+
+      cd ..
+
+      terraform plan $$varfile -out tf.plan && \
+      terraform show -json tf.plan | jq '.' > /checkov/tf.json
+    volumes:
+      - name: tf
+        path: '/checkov'
+
+  - id: 'TF Apply'
+    name: $_TF_IMAGE
+    entrypoint: 'sh'
+    dir: $_APPLICATION_DIRECTORY
+    args:
+    - '-c'
+    - |      
+      terraform apply tf.plan
+    volumes:
+      - name: tf
+        path: '/checkov'
+
+
+logsBucket: 'gs://$_LOG_BKT/$_ORG_ROOT/$_TF_DIRECTORY'
+options:
+ logging: GCS_ONLY
+ logStreamingOption: STREAM_ON
+substitutions: 
+  _ORG_ROOT: "66slz"
+  _TF_IMAGE: "hashicorp/terraform:1.2.9"
+  _TF_DIRECTORY: "0-bootstrap/66slz"
+  _APPLICATION_DIRECTORY: "0-bootstrap"
+  _ENVIRONMENT: "66slz"
+  _TF_STATE_BKT: "bkt-b-tfstate-e842"
+  _LOG_BKT: "tf-cloudbuilder-build-logs-prj-b-cicd-dvjr7oj8"

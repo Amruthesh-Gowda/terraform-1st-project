@@ -1,0 +1,81 @@
+######### 
+# Owner: 66degrees
+# Author: Bishwajeet Biswas
+# Version: 0.0.1
+########
+
+name: 'Checkov & Tf set up and plan'
+description: 'Static code analysis by Checkov and Set ups Terraform and does all except Apply'
+inputs:
+  tf_directory:  # id of input
+    description: 'where to execute terraform'
+    required: true
+  application_directory: 
+    description: 'application_directory'
+    required: required
+  org_root: 
+    description: 'root folder name'
+    required: true
+  environment: 
+    description: 'mention the environment'
+    required: true
+  wif_provider: 
+    description: 'Workload Identity Federation provider'
+    required: false
+  tf_sa: 
+    description: 'GCP service account for Terraform'
+    required: false
+  terraform_version: 
+    description: 'GCP Terraform Version'
+    required: true
+    default: 1.2.9
+  gcs_bucket: 
+    description: 'State file storage for Terraform'
+    required: false
+  github_token: 
+    description: 'github secret'
+    required: true
+  filter_one: 
+    description: "First path directory whose changes to be monitored"
+    required: true
+  filter_two: 
+    description: "second path directory whose changes to be monitored"
+    required: true
+    default: './*.md'
+  filter_third: 
+    description: "third path directory whose changes to be monitored"
+    required: false
+  filter_fourth: 
+    description: "fourth path directory whose changes to be monitored"
+    required: false
+
+
+runs:
+  using: "composite"
+  steps:
+    - uses: dorny/paths-filter@v2.10.2
+      if: (github.event_name != 'pull_request')
+      id: filter
+      with:
+        token: ${{ inputs.github_token }}
+        filters: |
+          verify_changes:
+            - ${{ inputs.filter_one }}
+            - ${{ inputs.filter_two }}
+            # - ${{ inputs.filter_third }}
+            # - ${{ inputs.filter_fourth }}
+
+
+    - name: Terraform before applying Bootstrap
+      if: ${{ steps.filter.outputs.verify_changes == 'true' }}
+      uses: ./.github/actions
+      id: plan
+      with:
+        tf_directory: ${{ inputs.tf_directory }}
+        org_root: ${{ inputs.org_root }}
+        environment: ${{ inputs.environment }}
+        terraforom_version: ${{ inputs.terraform_version }}
+        wif_provider: ${{ inputs.wif_provider }} #${{ secrets.WIF_PROVIDER}}
+        tf_sa: ${{ inputs.tf_Sa }}
+        gcs_bucket: ${{ inputs.gcs_bucket }}
+        github_token: ${{ inputs.github_token }}

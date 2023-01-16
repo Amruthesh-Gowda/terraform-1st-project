@@ -1,0 +1,50 @@
+module "ha_vpn" {
+  source = "terraform-google-modules/vpn/google//modules/vpn_ha"
+  version   = "~> 2.3.0"
+  for_each      = var.vpn_config
+  name            = each.value.name //"mt-np-vpn"
+  # depends_on    = [module.prod_host_project]
+  project_id  = each.value.project_id //"mt-hp-core-np"
+  region  = each.value.region //"us-east4"
+  network         = each.value.network //"projects/mt-hp-core-np/global/networks/mt-hp-vpc-np"
+  peer_external_gateway = {
+      redundancy_type = "TWO_IPS_REDUNDANCY" //"SINGLE_IP_INTERNALLY_REDUNDANT"
+      interfaces = [{
+          id = 0
+          ip_address = each.value.az_ip_zero //"20.85.253.245" //"8.8.8.8" # on-prem router ip address
+
+      },
+      {
+      id = 1
+      ip_address = each.value.az_ip_one //"20.232.248.181"
+      },
+    ]
+  }
+  router_asn = each.value.gcp_router_asn // 65001
+  tunnels = {
+    remote-0 = {
+      bgp_peer = {
+        address = each.value.router_zero_config.tunnel_zero_bgp_address //"169.254.21.2"
+        asn     = each.value.router_zero_config.tunnel_asn //65002
+      }
+      bgp_peer_options  = null
+      bgp_session_range = each.value.router_zero_config.tunnel_zero_bgp_range //"169.254.21.1/30"
+      ike_version       = 2
+      vpn_gateway_interface = 0
+      peer_external_gateway_interface = 0
+      shared_secret     = each.value.shared_secret //"SEMkSe9uvJrMC08JbCvY6mPbMlC8$nlz8tWOLW&UQE&d&"
+    }
+    remote-1 = {
+      bgp_peer = {
+        address = each.value.router_one_config.tunnel_one_bgp_address //"169.254.22.2"
+        asn     = each.value.router_one_config.tunnel_asn //65002
+      }
+      bgp_peer_options  = null
+      bgp_session_range = each.value.router_one_config.tunnel_one_bgp_range //"169.254.22.1/30"
+      ike_version       = 2
+      vpn_gateway_interface = 1
+      peer_external_gateway_interface = 1
+      shared_secret     = each.value.shared_secret //"SEMkSe9uvJrMC08JbCvY6mPbMlC8$nlz8tWOLW&UQE&d&"
+    }
+  }
+}
